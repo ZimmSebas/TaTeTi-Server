@@ -1,0 +1,7 @@
+
+Para manejo de Usuarios (CON):
+- Concatenar nombres de usuario con puertos.
+- Contestar al cliente si el usuario no fue aceptado (¿Cómo se hace?)
+- Sacar el "Otra-Cosa" plis.
+
+
