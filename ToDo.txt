@@ -4,4 +4,4 @@ Para manejo de Usuarios (CON):
 - Contestar al cliente si el usuario no fue aceptado (¿Cómo se hace?)
 - Sacar el "Otra-Cosa" plis.
 
-
+- net_adm:ping
