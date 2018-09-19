@@ -6,8 +6,8 @@
 
 % erl -name name@ip
 -module(tp).
--define(SERVERS, ['nodo1@127.0.0.1','nodo2@127.0.0.1', 'nodo3@127.0.0.1']).
--define(LOADS, [999, 999, 999]).
+-define(SERVERS, ['nodo1@127.0.0.1','nodo2@127.0.0.1']).
+-define(LOADS, [999, 999]).
 -export([init/0, load/0, transpose/1, winner/1, checkuser/1, dispatcher/1, gamelist/1, psocket/2, pcomando/4, pstat/0, pbalance/1]).
 %-compile(export_all).
 
@@ -70,22 +70,26 @@ checkuser(UserList) ->
 gamelist(GameList) ->
   receive
     % Imprime por terminal la lista de juegos
-		{print} -> io:format(">> Lista de partidas: ~p", [GameList]), gamelist(GameList);
+	{print} -> io:format(">> Lista de partidas: ~p", [GameList]), gamelist(GameList);
 
-    % Informa al jugador la lista de juegos
-		{print, Who} -> Who!{lsg, GameList};
-    
+% Informa al jugador la lista de juegos
+	{print, Who} -> Who!{lsg, GameList}, 
+	gamelist(GameList);
+
     {newnode, Gameid, User1} ->
-      gamelist([{Gameid, User1, empty} | GameList]);
-		
-		% Agrega un juego a la lista
-		{new, Gameid, User1} ->
-		  [{gamelist, Node}!{newnode, Gameid, User1} || Node <- nodes()],
-		  gamelist([{Gameid, User1, empty} | GameList]);
-		
-		% Se une un jugador a una partida existente
-		{add, Gameid, User2} -> gamelist([{X,Y, case X of Gameid -> User2; _ -> Z end} || {X,Y,Z} <- GameList]) 
-	end.
+      gamelist([{Gameid, User1, empty} | GameList]); 
+	
+	% Agrega un juego a la lista
+	{new, Gameid, User1, Who} ->
+	  [{gamelist, Node}!{newnode, Gameid, User1} || Node <- nodes()],
+  	  Who!{new},
+	  gamelist([{Gameid, User1, empty} | GameList]);
+ 
+      
+	% Se une un jugador a una partida existente
+	{add, Gameid, User2} -> gamelist([{X,Y, case X of Gameid -> User2; _ -> Z end} || {X,Y,Z} <- GameList]), 
+	gamelist(GameList) 
+  end.
 
 dispatcher(ListenSocket) ->
 	{ok, Socket} = gen_tcp:accept(ListenSocket),
@@ -106,7 +110,11 @@ psocket(Socket, Username) ->
 					receive
 						{con, error} -> gen_tcp:send(Socket, [">> Usted ya ha elegido un nombre de usuario: " | Username]), psocket(Socket, Username);
 						{con, User} -> gen_tcp:send(Socket, ">> Nombre de usuario aceptado.\n"), psocket(Socket, User);
-						{lsg, GameList} -> gen_tcp:send(Socket, [">> Lista de juegos: " | GameList]), psocket(Socket, Username);
+						{lsg, GameList} ->
+						    R= io_lib:format("~p ~n",[GameList]),
+                            lists:flatten(R), 
+						    gen_tcp:send(Socket, [">> Lista de juegos:" | R]), psocket(Socket, Username);
+						{new} -> gen_tcp:send(Socket, ">> Partida creada.\n"), psocket(Socket,Username);
 						{_, _} -> gen_tcp:send(Socket, [">> Comando no programado.\n"]), psocket(Socket, Username)
 					end
 			end
@@ -126,9 +134,9 @@ pcomando(Socket, Username, CMD, Who) ->
 					end
 			end;
 		["LSG", _] ->
-		  gamelist!{print, Who};
+		  {gamelist, node()}!{print, Who};
 		["NEW", Gameid] ->
-		  gamelist!{new, Gameid, Username};
+		  {gamelist, node()}!{new, Gameid, Username, Who};
 		[_, _] -> Who!{error, nocmd}
 	end.
 
