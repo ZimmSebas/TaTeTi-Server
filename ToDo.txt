@@ -1,7 +1,5 @@
+- Ver tema error OBS
+- PLAY (Input y output)
+- BYE, ver tema de cuando te vas, se pudre todas las partidas (Ver a quien avisas o cuando avisas)
+- 
 
-Para manejo de Usuarios (CON):
-- Concatenar nombres de usuario con puertos.
-- Contestar al cliente si el usuario no fue aceptado (¿Cómo se hace?)
-- Sacar el "Otra-Cosa" plis.
-
-- net_adm:ping
