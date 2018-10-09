@@ -76,52 +76,80 @@ gamelist(GameList) ->
 
     % Informa al jugador la lista de juegos
 	{print, Who} ->
-	    Who!{lsg, [{X,Y} || {X,Y,_,_,_,_} <- GameList]},
+	    Who!{lsg, [{X,Y} || {X,Y,_,_,_,_,_} <- GameList]},
 	    gamelist(GameList);
 
-    {newnode, Local, Visitante, Tablero, Observadores, LocalId, VisId} ->
-        gamelist([{Local, Visitante, Tablero, Observadores, LocalId, VisId} | GameList]); 
+  {newnode, Local, Visitante, Tablero, Observadores, LocalId, VisId, Turno} ->
+      gamelist([{Local, Visitante, Tablero, Observadores, LocalId, VisId, Turno} | GameList]); 
 	
 	% Agrega un juego a la lista
 	{new, Local, Visitante, Tablero, Observadores, Who} ->
-	  Members = [ {A,B,C,D,E,F} || {A,B,C,D,E,F} <- GameList, (A == Local) or (B == Local) ],
+	  Members = [ {A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, (A == Local) or (B == Local) ],
 	  if
 	    Members == [] ->
-	        [{gamelist, Node}!{newnode, Local, Visitante, Tablero, Observadores, Who, empty} || Node <- nodes()],
+	        [{gamelist, Node}!{newnode, Local, Visitante, Tablero, Observadores, Who, empty, true} || Node <- nodes()],
             Who!{new, ok}, % Avisa que salio todo bien
-            gamelist([{Local, Visitante, Tablero, Observadores, Who, empty} | GameList]);
+            gamelist([{Local, Visitante, Tablero, Observadores, Who, empty, true} | GameList]);
         true -> Who!{new,error}, gamelist(GameList)
-      end;
+    end;
   	
-  	% Actualiza la lista cuando se une un observador
-  	{newobs, NewList} -> gamelist(NewList);
+	% Juega una jugada
+	{pla, Play, Who} ->
+  	Temp = [ {A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, ((E == Who) and G) or ((F == Who) and (not G)) and (F /= empty) ],
+	  if
+	    Temp /= [] ->
+	      [{_,_,Tablero,_,_,_,Turno}] = Temp,
+	      [Aux] = Play,
+	      Jugada = Aux - 48,
+	      Fila = trunc(Jugada/3) + 1,
+	      Columna = (Jugada rem 3) + 1,
+	      [[P1,P2,P3],[P4,P5,P6],[P7,P8,P9]] = Tablero,      
+	      TableroCool = [P1,P2,P3,P4,P5,P6,P7,P8,P9],
+	      Pos = lists:nth(Columna, lists:nth(Fila, Tablero)),
+        if Pos /= 1 % Casillero ocupado
+          -> Who!{pla,error};
+          true -> % Casillero vacio
+            if 
+              Turno -> [J1,J2,J3,J4,J5,J6,J7,J8,J9] = lists:sublist(TableroCool,Jugada-1) ++ [lists:nth(Jugada,TableroCool)+2] ++ lists:nthtail(Jugada,TableroCool);
+              true -> [J1,J2,J3,J4,J5,J6,J7,J8,J9] =  lists:sublist(TableroCool,Jugada-1) ++ [lists:nth(Jugada,TableroCool)+8] ++ lists:nthtail(Jugada,TableroCool)
+            end,
+            NewBoard = [[J1+48,J2+48,J3+48],[J4+48,J5+48,J6+48],[J7+48,J8+48,J9+48]],
+            Who!{pla,ok,NewBoard}
+        end,
+        gamelist(GameList);
+	    true ->
+	      Who!{pla,error}, gamelist(GameList)  
+	  end;
   	
-  	% Intenta unirse un observador
-  	{obs, GameId, Username, Who} -> % PUEDE OBSERVAR VARIAS VECES
-  	    Members = [ {A,B,C,D,E,F} || {A,B,C,D,E,F} <- GameList, A == GameId, A /= Username, B /= Username ],
-  	    if
-  	        Members /= [] ->
-  	            Who!{obs, ok},
-  	            NewList = [{A,B,C, case A of GameId -> [Who] ++ D; _ -> D end,E,F} || {A,B,C,D,E,F} <- GameList],
-  	            [{gamelist, Node}!{newobs, NewList} || Node <- nodes()],
-  	            gamelist(NewList);
-  	        true -> Who!{obs,error}, gamelist(GameList)
-  	    end;
-  	  
-  	% Actualiza la lista cuando se une un jugador.
-  	{actlist, NewList} -> gamelist(NewList);
+	% Actualiza la lista cuando se une un observador
+	{newobs, NewList} -> gamelist(NewList);
   	
-  	% Intenta unirse a una partida.
-  	{acc, GameId, Username, Who} ->
-  	    Members = [ {A,B,C,D,E,F} || {A,B,C,D,E,F} <- GameList, A == GameId, B == empty, A /= Username ],
-  	    if
-  	        Members /= [] ->
-  	            Who!{acc, ok},
-  	            NewList = [{A, case A of GameId -> Username; _ -> B end,C,D,E, Who} || {A,B,C,D,E,_} <- GameList],
-  	            [{gamelist, Node}!{actlist, NewList} || Node <- nodes()],
-  	            gamelist(NewList);
-  	        true -> Who!{acc,error}, gamelist(GameList)
-  	    end
+	% Intenta unirse un observador
+	{obs, GameId, Username, Who} -> % PUEDE OBSERVAR VARIAS VECES
+	    Members = [ {A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, A == GameId, A /= Username, B /= Username ],
+	    if
+	        Members /= [] ->
+	            Who!{obs, ok},
+	            NewList = [{A,B,C, case A of GameId -> [Who] ++ D; _ -> D end,E,F,G} || {A,B,C,D,E,F,G} <- GameList],
+	            [{gamelist, Node}!{newobs, NewList} || Node <- nodes()],
+	            gamelist(NewList);
+	        true -> Who!{obs,error}, gamelist(GameList)
+	    end;
+	  
+	% Actualiza la lista cuando se une un jugador.
+	{actlist, NewList} -> gamelist(NewList);
+	
+	% Intenta unirse a una partida.
+	{acc, GameId, Username, Who} ->
+	    Members = [ {A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, A == GameId, B == empty, A /= Username ],
+	    if
+	        Members /= [] ->
+	            Who!{acc, ok},
+	            NewList = [{A, case A of GameId -> Username; _ -> B end,C,D,E, Who,G} || {A,B,C,D,E,_,G} <- GameList],
+	            [{gamelist, Node}!{actlist, NewList} || Node <- nodes()],
+	            gamelist(NewList);
+	        true -> Who!{acc,error}, gamelist(GameList)
+	    end
   end.
 
 dispatcher(ListenSocket) ->
@@ -154,8 +182,16 @@ psocket(Socket, Username) ->
 						{new, error} -> gen_tcp:send(Socket, ">> Error: usted ya es miembro de una partida.\n"), psocket(Socket,Username);
 						{acc, ok} -> gen_tcp:send(Socket, ">> Usted se ha unido a la partida.\n"), psocket(Socket,Username);
 						{acc, error} -> gen_tcp:send(Socket, ">> Error: no se ha podido unir a la partida.\n"), psocket(Socket,Username);
-    					{obs, ok} -> gen_tcp:send(Socket, ">> Usted esta observando la partida.\n"), psocket(Socket,Username);
+    				{obs, ok} -> gen_tcp:send(Socket, ">> Usted esta observando la partida.\n"), psocket(Socket,Username);
 						{obs, error} -> gen_tcp:send(Socket, ">> Error: no se puede observar esa partida.\n"), psocket(Socket,Username);
+						{pla, ok, Tablero} ->
+						    [Fila1,Fila2,Fila3] = Tablero,
+						    gen_tcp:send(Socket, ">> Ud ha jugado.\n"),
+						    gen_tcp:send(Socket, Fila1),
+						    gen_tcp:send(Socket, Fila2),
+						    gen_tcp:send(Socket, Fila3),
+    						psocket(Socket,Username);
+						{pla, error} -> gen_tcp:send(Socket, ">> Error: no se puede aceptar la jugada.\n"), psocket(Socket,Username);
 						{_, _} -> gen_tcp:send(Socket, [">> Comando no programado.\n"]), psocket(Socket, Username)
 					end
 			end
@@ -180,6 +216,7 @@ pcomando(Socket, Username, CMD, Who) ->
 		    {gamelist, node()}!{new, Username, empty, ?TABLEROINICIAL, [], Who};
 		["OBS", GameId] -> gamelist!{obs, GameId, Username, Who};
 		["ACC", GameId] -> gamelist!{acc, GameId, Username, Who};
+		["PLA", Play] -> gamelist!{pla,Play,Who};
 		_ -> Who!{error, nocmd}
 	end.
 

@@ -1,5 +1,5 @@
 - Ver tema error OBS
-- PLAY (Input y output)
+- PLAY ver tema de actualizar lista
+- Ver tema de imprimir la partida.
 - BYE, ver tema de cuando te vas, se pudre todas las partidas (Ver a quien avisas o cuando avisas)
 - 
-
