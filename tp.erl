@@ -59,6 +59,14 @@ checkuser(UserList) ->
 
     % Agrega un usuario a la lista
     {add, User} -> checkuser([User | UserList]);
+    
+    % Elimina un usuario que sale del programa
+    {del, User} -> 
+      NewList = [X || X <- UserList, X /= User], 
+      [{checkuser, Node}!{delmsg, NewList} || Node <- nodes()],
+      checkuser(NewList);
+    
+    {delmsg, NewList} -> checkuser(NewList); 
 
     % Verifica si el nombre de usuario esta en uso
     {Who, User} ->
@@ -80,6 +88,7 @@ checkuser(UserList) ->
 %   G: Booleano que indica a quien corresponde el turno (True = Local) }
 gamelist(GameList) ->
   receive
+  
     % Imprime por terminal la lista de juegos
     {print} -> io:format(">> Lista de partidas: ~p", [GameList]), gamelist(GameList);
 
@@ -103,13 +112,29 @@ gamelist(GameList) ->
     
     % Actualiza un tablero modificado en otro servidor.
     {acttab, NewList} -> gamelist(NewList);
-
+    
+    % Me retiro del servidor
+    {bye,Username,Who} -> 
+      Temp = [ {A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, ((E == Who) or (F == Who))],
+      FinList = [{A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, F /= Who],
+      FinalList = [{A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- FinList, E /= Who],
+      checkuser!{del,Username},
+      Who!{bye},
+      
+      if Temp /= [] ->
+        [{_,_,_,Observadores,_,_,_}] = Temp,
+        [Mailbox!{bye} || Mailbox <- Observadores],
+        gamelist(FinalList);      
+        true -> gamelist(FinalList)
+      end;
+      
+      
     % Juega una jugada.
     {pla, Play, Who} ->
     Temp = [ {A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, ((E == Who) and G) or ((F == Who) and (not G)) and (F /= empty) ],
     if
       Temp /= [] ->
-        [{_,_,Tablero,Observadores,_,_,Turno}] = Temp,
+        [{_,_,Tablero,Observadores,Creador,_,Turno}] = Temp,
         [Aux] = Play,
         Jugada = Aux - 48,
         Fila = trunc((Jugada-1)/3) + 1,
@@ -125,11 +150,17 @@ gamelist(GameList) ->
               true -> [J1,J2,J3,J4,J5,J6,J7,J8,J9] =  lists:sublist(TableroCool,Jugada-1) ++ [lists:nth(Jugada,TableroCool)+8] ++ lists:nthtail(Jugada,TableroCool)
             end,
             NewBoard = [[J1,J2,J3],[J4,J5,J6],[J7,J8,J9]],
-            Who!{pla, ok},
             [Mailbox!{pla,ok,NewBoard} || Mailbox <- Observadores],
-            NewList = [{A,B,NewBoard,D,E,F, not G} || {A,B,_,D,E,F,G} <- GameList, (E == Who) or (F == Who)],
+            NewList = [{A,B,if (E == Who) or (F == Who) -> NewBoard; true -> C end,D,E,F,if (E == Who) or (F == Who) -> not G; true -> G end} || {A,B,C,D,E,F,G} <- GameList],
             [{gamelist, Node}!{acttab, NewList} || Node <- nodes()],
-            gamelist(NewList)
+            Result = winner(NewBoard), 
+            FinList = [{A,B,C,D,E,F,G} || {A,B,C,D,E,F,G} <- GameList, (E /= Creador) ],
+            if
+              Result == 0 -> Who!{pla, ok}, gamelist(NewList);
+              Result == 1 -> [Mailbox!{fin1,NewBoard} || Mailbox <- Observadores], Who!{pla, ok}, gamelist(FinList);
+              Result == 2 -> [Mailbox!{fin2,NewBoard} || Mailbox <- Observadores], Who!{pla, ok}, gamelist(FinList);
+              Result == 3 -> [Mailbox!{emp,NewBoard} || Mailbox <- Observadores], Who!{pla, ok}, gamelist(FinList)
+            end
         end;
       true -> Who!{pla,error}, gamelist(GameList)
     end;
@@ -175,6 +206,8 @@ dispatcher(ListenSocket) ->
 % Recibe actualizaciones
 mailbox(Socket) ->
   receive
+    {bye} -> gen_tcp:send(Socket, ">> Un jugador ha abandonado la partida\n");
+      
     {pla, ok, Tablero} ->
       [[P1,P2,P3],[P4,P5,P6],[P7,P8,P9]] = Tablero,
       [Fila1, Fila2, Fila3] = [[trunc(P1*P1*(-15/8)+24*P1+(191/8)),
@@ -186,7 +219,52 @@ mailbox(Socket) ->
                                 [trunc(P7*P7*(-15/8)+24*P7+(191/8)),
                                 trunc(P8*P8*(-15/8)+24*P8+(191/8)),
                                 trunc(P9*P9*(-15/8)+24*P9+(191/8))]],
-      gen_tcp:send(Socket, ">> Su adversario ha jugado.\n"),
+      gen_tcp:send(Socket, ">> Se ha realizado una jugada.\n"),
+      gen_tcp:send(Socket, Fila1), gen_tcp:send(Socket, "\n"),
+      gen_tcp:send(Socket, Fila2), gen_tcp:send(Socket, "\n"),
+      gen_tcp:send(Socket, Fila3), gen_tcp:send(Socket, "\n");
+    {fin1, Tablero} ->
+          [[P1,P2,P3],[P4,P5,P6],[P7,P8,P9]] = Tablero,
+          [Fila1, Fila2, Fila3] = [[trunc(P1*P1*(-15/8)+24*P1+(191/8)),
+                                trunc(P2*P2*(-15/8)+24*P2+(191/8)),
+                                trunc(P3*P3*(-15/8)+24*P3+(191/8))],
+                                [trunc(P4*P4*(-15/8)+24*P4+(191/8)),
+                                trunc(P5*P5*(-15/8)+24*P5+(191/8)),
+                                trunc(P6*P6*(-15/8)+24*P6+(191/8))],
+                                [trunc(P7*P7*(-15/8)+24*P7+(191/8)),
+                                trunc(P8*P8*(-15/8)+24*P8+(191/8)),
+                                trunc(P9*P9*(-15/8)+24*P9+(191/8))]],
+      gen_tcp:send(Socket, ">> La partida ha concluido. Gana el jugador O.\n"),
+      gen_tcp:send(Socket, Fila1), gen_tcp:send(Socket, "\n"),
+      gen_tcp:send(Socket, Fila2), gen_tcp:send(Socket, "\n"),
+      gen_tcp:send(Socket, Fila3), gen_tcp:send(Socket, "\n");
+    {fin2, Tablero} ->
+          [[P1,P2,P3],[P4,P5,P6],[P7,P8,P9]] = Tablero,
+          [Fila1, Fila2, Fila3] = [[trunc(P1*P1*(-15/8)+24*P1+(191/8)),
+                                trunc(P2*P2*(-15/8)+24*P2+(191/8)),
+                                trunc(P3*P3*(-15/8)+24*P3+(191/8))],
+                                [trunc(P4*P4*(-15/8)+24*P4+(191/8)),
+                                trunc(P5*P5*(-15/8)+24*P5+(191/8)),
+                                trunc(P6*P6*(-15/8)+24*P6+(191/8))],
+                                [trunc(P7*P7*(-15/8)+24*P7+(191/8)),
+                                trunc(P8*P8*(-15/8)+24*P8+(191/8)),
+                                trunc(P9*P9*(-15/8)+24*P9+(191/8))]],
+      gen_tcp:send(Socket, ">> La partida ha concluido. Gana el jugador X.\n"),
+      gen_tcp:send(Socket, Fila1), gen_tcp:send(Socket, "\n"),
+      gen_tcp:send(Socket, Fila2), gen_tcp:send(Socket, "\n"),
+      gen_tcp:send(Socket, Fila3), gen_tcp:send(Socket, "\n");
+    {emp, Tablero} ->
+          [[P1,P2,P3],[P4,P5,P6],[P7,P8,P9]] = Tablero,
+          [Fila1, Fila2, Fila3] = [[trunc(P1*P1*(-15/8)+24*P1+(191/8)),
+                                trunc(P2*P2*(-15/8)+24*P2+(191/8)),
+                                trunc(P3*P3*(-15/8)+24*P3+(191/8))],
+                                [trunc(P4*P4*(-15/8)+24*P4+(191/8)),
+                                trunc(P5*P5*(-15/8)+24*P5+(191/8)),
+                                trunc(P6*P6*(-15/8)+24*P6+(191/8))],
+                                [trunc(P7*P7*(-15/8)+24*P7+(191/8)),
+                                trunc(P8*P8*(-15/8)+24*P8+(191/8)),
+                                trunc(P9*P9*(-15/8)+24*P9+(191/8))]],
+      gen_tcp:send(Socket, ">> La partida ha concluido. Ha habido un empate.\n"),
       gen_tcp:send(Socket, Fila1), gen_tcp:send(Socket, "\n"),
       gen_tcp:send(Socket, Fila2), gen_tcp:send(Socket, "\n"),
       gen_tcp:send(Socket, Fila3), gen_tcp:send(Socket, "\n")
@@ -220,8 +298,9 @@ psocket(Socket, Username, Mailbox) ->
             {acc, error} -> gen_tcp:send(Socket, ">> Error: no se ha podido unir a la partida.\n"), psocket(Socket,Username,Mailbox);
             {obs, ok} -> gen_tcp:send(Socket, ">> Usted esta observando la partida.\n"), psocket(Socket,Username,Mailbox);
             {obs, error} -> gen_tcp:send(Socket, ">> Error: no se puede observar esa partida.\n"), psocket(Socket,Username,Mailbox);
-            {pla, ok} -> gen_tcp:send(Socket, ">> Usted ha jugado.\n"), psocket(Socket,Username,Mailbox);
+            {pla, ok} -> psocket(Socket,Username,Mailbox);
             {pla, error} -> gen_tcp:send(Socket, ">> Error: no se puede aceptar la jugada.\n"), psocket(Socket,Username,Mailbox);
+            {bye} -> gen_tcp:send(Socket, ">> Adios!.\n");
             {_, _} -> gen_tcp:send(Socket, [">> Comando no programado.\n"]), psocket(Socket,Username,Mailbox)
           end
       end
@@ -246,6 +325,7 @@ pcomando(Socket, Username, CMD, Who, Mailbox) ->
     ["OBS", GameId] -> gamelist!{obs, GameId, Username, Who, Mailbox};
     ["ACC", GameId] -> gamelist!{acc, GameId, Username, Who, Mailbox};
     ["PLA", Play] -> gamelist!{pla,Play,Who};
+    ["BYE"] -> gamelist!{bye, Username, Who};
     _ -> Who!{error, nocmd}
   end.
 
